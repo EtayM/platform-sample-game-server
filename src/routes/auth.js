@@ -2,17 +2,23 @@ const express = require('express');
 const router = express.Router();
 const AuthService = require('../services/authService');
 const appKeyAuth = require('../middlewares/appKeyAuth');
+const { getManagedWallet, createManagedWallet } = require('../services/enjinService');
 
 // Register endpoint
 router.post('/register', appKeyAuth, async (req, res) => {
     try {
         const { email, password } = req.body;
         const result = await AuthService.register(email, password);
-        
+        const createManagedWalletResponse = await createManagedWallet(email);
+        let wallet = null;
+        if (createManagedWalletResponse)
+            wallet = createManagedWalletResponse.account.address;
+            
         res.status(201).json({
             success: true,
             data: {
                 email: result.user.email,
+                wallet: wallet,
                 token: result.token
             }
         });

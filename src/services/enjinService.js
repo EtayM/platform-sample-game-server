@@ -1,6 +1,13 @@
 const axios = require('axios');
 const fs = require('fs');
 
+// Resource token definitions
+const RESOURCE_TOKENS = [
+    { id: 1, name: "Gold Coin", media: "[{\"type\":\"image/png\",\"url\":\"https://cdn.enjin.io/mint/image/gold-coin.png\"}]"},
+    { id: 2, name: "Gold Coin (Blue)", media: "[{\"type\":\"image/png\",\"url\":\"https://cdn.enjin.io/mint/image/gold-coin-blue.png\"}]" },
+    { id: 3, name: "Green Gem", media: "[{\"type\":\"image/png\",\"url\":\"https://cdn.enjin.io/mint/image/green-gem.png\"}]" }
+];
+
 async function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -61,21 +68,26 @@ async function updateEnvFile(collectionId) {
 
 async function createCollection(){
     const response = await axios.post(process.env.ENJIN_API_URL, {
-        query: `mutation CreateCollection($forceCollapsingSupply: Boolean) {
+        query: `mutation CreateCollection(
+    $forceCollapsingSupply: Boolean
+    $name: String!
+    $bannerImage: String!
+    $media: String!
+) {
     CreateCollection(
         mintPolicy: { forceCollapsingSupply: $forceCollapsingSupply }
         attributes:[
             {
                 key: \"name\",
-                value: \"Enjin Sample Game\"
+                value: $name
             },
             {
                 key: \"banner_image\",
-                value: \"https://cdn.enjin.io/mint/image/sample-game-collection-banner.png\"
+                value: $bannerImage
             },
             {
                 key: \"media\",
-                value: "[{\\\"type\\\":\\\"image/png\\\",\\\"url\\\":\\\"https://cdn.enjin.io/mint/image/sample-game-collection-image.png\\\"}]"
+                value: $media
             }
         ]
     ) {
@@ -85,7 +97,11 @@ async function createCollection(){
     }
 }`,
         variables: {
-            forceCollapsingSupply: false
+            forceCollapsingSupply: false,
+            name: "Enjin Sample Game",
+            bannerImage: "https://cdn.enjin.io/mint/image/sample-game-collection-banner.png",
+            media: "[{\"type\":\"image/png\",\"url\":\"https://cdn.enjin.io/mint/image/sample-game-collection-image.png\"}]"
+
         }
     }, {
         headers: {
@@ -100,13 +116,14 @@ async function createCollection(){
 async function createToken(collectionId, tokenId, name, media){
     const response = await axios.post(process.env.ENJIN_API_URL, {
                 query: `mutation CreateToken(
-  $collectionId: BigInt!
-  $tokenId: BigInt
-  $name: String!
-  $media: String!
+    $recipient: String!
+    $collectionId: BigInt!
+    $tokenId: BigInt
+    $name: String!
+    $media: String!
 ){
   CreateToken(
-    recipient: "5DcENk1KZjFo1C3Rp9drb1wuWP3vgZMUTEjBV3vw3Jm3wamK"
+    recipient: $recipient
     collectionId: $collectionId
     params:{
       tokenId: {integer: $tokenId}
@@ -129,6 +146,7 @@ async function createToken(collectionId, tokenId, name, media){
   }
 }`,
         variables: {
+            recipient: process.env.DAEMON_WALLET_ADDRESS || "5EJDmqEoySnLk8xvPNPQGrb9qUrYLcbf38K4R6zKeNryvfD6",
             collectionId: collectionId,
             tokenId: tokenId,
             name: name,
@@ -164,12 +182,42 @@ async function getToken(collectionId, tokenId) {
     return response;
 }
 
-async function mintToken(collectionId, tokenId) {
+async function getManagedWallet(externalId){
+    const response = await axios.post(process.env.ENJIN_API_URL, {
+        query: `query GetWallet($externalId: String!){
+  GetWallet(externalId: $externalId){
+    account{
+      publicKey
+      address
+    }
+  }
+}`,
+        variables: {
+            externalId: externalId
+        }
+    }, {
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': process.env.ENJIN_API_KEY
+        }
+    });
+
+    return response.data.data.GetWallet;
+}
+
+async function createManagedWallet(externalId){
     try {
+        const existingWallet = await getManagedWallet(externalId);
+        if (existingWallet) {
+            console.log(`Managed wallet with external ID ${externalId} already exists.`);
+            return existingWallet;
+        }
         const response = await axios.post(process.env.ENJIN_API_URL, {
-            query: `todo`,
+            query: `mutation CreateWallet($externalId: String!){
+  CreateWallet(externalId: $externalId)
+}`,
             variables: {
-                forceCollapsingSupply: false
+                externalId: externalId
             }
         }, {
             headers: {
@@ -179,218 +227,241 @@ async function mintToken(collectionId, tokenId) {
         });
 
         
-        await sleep(1000);
-        const requestId = response.data.data.CreateCollection.id;
-        console.log(`New collection request was sent. Please confirm the request in the Enjin Platform. Request ID: ${requestId}`);
+        const maxRetries = 10;
+        const retryInterval = 1000;
 
-        // Poll for transaction status every 5 seconds
-        while (true) {
-            const transaction = await getTransactionStatus(requestId);
-
-            if (transaction.state === 'PENDING'){
-                console.log(`Please confirm the request in the Enjin Platform. Request ID: ${requestId}`);
-                await sleep(10000);
-                continue;
-            }
-            
-            if (transaction.state === 'FINALIZED' && transaction.result === 'EXTRINSIC_SUCCESS') {
-                const collectionId = await extractCollectionId(transaction);
-                if (collectionId) {
-                    await updateEnvFile(collectionId);
-                    console.log(`Created new collection with ID: ${collectionId}. You can start playing the game!`);
-                    break;
-                }
-            } else if (transaction.state === 'FAILED' || transaction.result === 'EXTRINSIC_FAILED') {
-                throw new Error('Collection creation failed');
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            const wallet = await getManagedWallet(externalId);
+            if (wallet && wallet.account && wallet.account.address) {
+                return wallet; // Wallet found, return it.
             }
 
-            console.log('Waiting for collection creation to finalize...');
-            await sleep(10000);
+            // If wallet not found, wait before the next attempt.
+            await sleep(retryInterval);
         }
+
+        // If the loop completes without finding the wallet, handle the failure.
+        console.error(`Failed to retrieve wallet for ${externalId} after ${maxRetries} attempts.`);
+        return null;
+        
     } catch (error) {
-        console.error('Failed to create collection:', error);
+        console.error(`Failed to create managed wallet with external ID ${externalId}:`, error);
         throw error;
+    }
+    
+}
+
+async function mintToken(tokenId, recipient, amount){
+    collectionId = process.env.ENJIN_COLLECTION_ID;
+    const response = await axios.post(process.env.ENJIN_API_URL, {
+        query: `mutation mintToken(
+  $recipient: String!
+  $collectionId: BigInt!
+  $tokenId: BigInt
+  $amount: BigInt!
+){
+  MintToken(
+    recipient: $recipient
+    collectionId: $collectionId
+    params: {
+      tokenId: {integer: $tokenId}
+      amount: $amount
+    }
+  ){
+    id
+    method
+    state
+  }
+}`,
+        variables: {
+            recipient: recipient,
+            collectionId: collectionId,
+            tokenId: tokenId,
+            amount: amount
+        }
+    }, {
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': process.env.ENJIN_API_KEY
+        }
+    });
+
+    return response;
+}
+
+async function burnToken(tokenId, recipient, amount){
+    collectionId = process.env.ENJIN_COLLECTION_ID;
+    const response = await axios.post(process.env.ENJIN_API_URL, {
+                query: `mutation mintToken(
+  $recipient: String!
+  $collectionId: BigInt!
+  $tokenId: BigInt
+  $amount: BigInt!
+){
+  MintToken(
+    recipient: $recipient
+    collectionId: $collectionId
+    params: {
+      tokenId: {integer: $tokenId}
+      amount: $amount
+    }
+  ){
+    id
+    method
+    state
+  }
+}`,
+        variables: {
+            recipient: recipient,
+            collectionId: collectionId,
+            tokenId: tokenId,
+            amount: amount
+        }
+    }, {
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': process.env.ENJIN_API_KEY
+        }
+    });
+
+    return response;
+}
+
+async function transferToken(tokenId, recipient, amount){
+    collectionId = process.env.ENJIN_COLLECTION_ID;
+    const response = await axios.post(process.env.ENJIN_API_URL, {
+                query: `mutation mintToken(
+  $recipient: String!
+  $collectionId: BigInt!
+  $tokenId: BigInt
+  $amount: BigInt!
+){
+  MintToken(
+    recipient: $recipient
+    collectionId: $collectionId
+    params: {
+      tokenId: {integer: $tokenId}
+      amount: $amount
+    }
+  ){
+    id
+    method
+    state
+  }
+}`,
+        variables: {
+            recipient: recipient,
+            collectionId: collectionId,
+            tokenId: tokenId,
+            amount: amount
+        }
+    }, {
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': process.env.ENJIN_API_KEY
+        }
+    });
+
+    return response;
+}
+
+async function waitForTransaction(requestId, operationType = 'operation') {
+    while (true) {
+        const transaction = await getTransactionStatus(requestId);
+
+        if (transaction.state === 'PENDING') {
+            console.log(`Please confirm the ${operationType} request in the Enjin Platform. Request ID: ${requestId}`);
+            await sleep(10000);
+            continue;
+        }
+
+        if (transaction.state === 'FINALIZED' && transaction.result === 'EXTRINSIC_SUCCESS') {
+            return transaction;
+        }
+
+        if (transaction.state === 'FAILED' || transaction.result === 'EXTRINSIC_FAILED') {
+            throw new Error(`${operationType} failed`);
+        }
+
+        console.log(`Waiting for the ${operationType} to finalize...`);
+        await sleep(10000);
     }
 }
 
-async function checkAndPrepareCollection() {
+async function checkAndCreateCollection() {
     if (!process.env.ENJIN_COLLECTION_ID) {
-        console.log('No collection ID found. Creating new collection...');
+        console.log('No collection ID found. Creating new collection, please wait...');
         try {
             const createCollectionResponse = await createCollection();
-            await sleep(1000);
+            await sleep(10000);
+            
             const requestId = createCollectionResponse.data.data.CreateCollection.id;
-
-            // Poll for transaction status every 10 seconds
-            while (true) {
-                const transaction = await getTransactionStatus(requestId);
-
-                if (transaction.state === 'PENDING'){
-                    console.log(`Please confirm the request in the Enjin Platform. Request ID: ${requestId}`);
-                    await sleep(10000);
-                    continue;
-                }
-                
-                if (transaction.state === 'FINALIZED' && transaction.result === 'EXTRINSIC_SUCCESS') {
-                    const collectionId = await extractCollectionId(transaction);
-                    if (collectionId) {
-                        await updateEnvFile(collectionId);
-                        console.log(`Created new collection with ID: ${collectionId}.`);
-                        break;
-                    }
-                } else if (transaction.state === 'FAILED' || transaction.result === 'EXTRINSIC_FAILED') {
-                    throw new Error('Collection creation failed');
-                }
-
-                console.log('Waiting for collection creation to finalize...');
-                await sleep(10000);
+            const transaction = await waitForTransaction(requestId, "'Enjin Sample Game' collection creation");
+            
+            const collectionId = await extractCollectionId(transaction);
+            if (collectionId) {
+                await updateEnvFile(collectionId);
+                console.log(`Created new collection with ID: ${collectionId}.`);
+                return collectionId;
             }
+            throw new Error('Failed to extract collection ID');
         } catch (error) {
             console.error('Failed to create collection:', error);
             throw error;
         }
     }
+    return process.env.ENJIN_COLLECTION_ID;
+}
 
-    let tokenResource1Exists = true;
-    let tokenResource2Exists = true;
-    let tokenResource3Exists = true;
-
-    // Check if resource token #1 is created
-    try{
-        const getTokenResponse = await getToken(process.env.ENJIN_COLLECTION_ID, 1)
+async function checkTokenExists(collectionId, tokenId) {
+    try {
+        await getToken(collectionId, tokenId);
+        return true;
     } catch (error) {
-        if (error.response && error.response.status === 400)
-            tokenResource1Exists = false;
-        else
-            throw error;
-    }
-
-    // Check if resource token #2 is created
-    try{
-        const getTokenResponse = await getToken(process.env.ENJIN_COLLECTION_ID, 2)
-    } catch (error) {
-        if (error.response && error.response.status === 400)
-            tokenResource2Exists = false;
-        else
-            throw error;
-    }
-
-    // Check if resource token #3 is created
-    try{
-        const getTokenResponse = await getToken(process.env.ENJIN_COLLECTION_ID, 3)
-    } catch (error) {
-        if (error.response && error.response.status === 400)
-            tokenResource3Exists = false;
-        else
-            throw error;
-    }
-
-    // Creating resource token #1 if it's wasn't created yet.
-    try{
-        if (!tokenResource1Exists){
-            console.log("Creating resource token #1.")
-            const createTokenResponse = await createToken(process.env.ENJIN_COLLECTION_ID, 1, "Resource Token #1", "[{\\\"type\\\":\\\"image/png\\\",\\\"url\\\":\\\"https://cdn.enjin.io/mint/image/sample-game-collection-image.png\\\"}]");
-            await sleep(1000);
-            const createTokenRequestId = createTokenResponse.data.data.CreateToken.id;
-
-            // Poll for transaction status every 10 seconds
-            while (true) {
-                const transaction = await getTransactionStatus(createTokenRequestId);
-
-                if (transaction.state === 'PENDING'){
-                    console.log(`Please confirm the request in the Enjin Platform. Request ID: ${createTokenRequestId}`);
-                    await sleep(10000);
-                    continue;
-                }
-                
-                if (transaction.state === 'FINALIZED' && transaction.result === 'EXTRINSIC_SUCCESS') {
-                    console.log("Resource token #1 created successfully.");
-                    break;
-                } else if (transaction.state === 'FAILED' || transaction.result === 'EXTRINSIC_FAILED') {
-                    throw new Error('Token creation failed');
-                }
-
-                console.log('Waiting for token creation to finalize...');
-                await sleep(10000);
-            }
-
+        if (error.response && error.response.status === 400) {
+            return false;
         }
-    } catch (error) {
-        console.error('Failed to create resource token #1:', error);
-        throw error;
-    }
-
-    // Creating resource token #2 if it's wasn't created yet.
-    try{
-        if (!tokenResource2Exists){
-            console.log("Creating resource token #2.")
-            const createTokenResponse = await createToken(process.env.ENJIN_COLLECTION_ID, 2, "Resource Token #2", "[{\\\"type\\\":\\\"image/png\\\",\\\"url\\\":\\\"https://cdn.enjin.io/mint/image/sample-game-collection-image.png\\\"}]");
-            await sleep(1000);
-            const createTokenRequestId = createTokenResponse.data.data.CreateToken.id;
-
-            // Poll for transaction status every 10 seconds
-            while (true) {
-                const transaction = await getTransactionStatus(createTokenRequestId);
-
-                if (transaction.state === 'PENDING'){
-                    console.log(`Please confirm the request in the Enjin Platform. Request ID: ${createTokenRequestId}`);
-                    await sleep(10000);
-                    continue;
-                }
-                
-                if (transaction.state === 'FINALIZED' && transaction.result === 'EXTRINSIC_SUCCESS') {
-                    console.log("Resource token #2 created successfully.");
-                    break;
-                } else if (transaction.state === 'FAILED' || transaction.result === 'EXTRINSIC_FAILED') {
-                    throw new Error('Token creation failed');
-                }
-
-                console.log('Waiting for token creation to finalize...');
-                await sleep(10000);
-            }
-
-        }
-    } catch (error) {
-        console.error('Failed to create resource token #2:', error);
-        throw error;
-    }
-
-    // Creating resource token #3 if it's wasn't created yet.
-    try{
-        if (!tokenResource3Exists){
-            console.log("Creating resource token #3.")
-            const createTokenResponse = await createToken(process.env.ENJIN_COLLECTION_ID, 3, "Resource Token #3", "[{\\\"type\\\":\\\"image/png\\\",\\\"url\\\":\\\"https://cdn.enjin.io/mint/image/sample-game-collection-image.png\\\"}]");
-            await sleep(1000);
-            const createTokenRequestId = createTokenResponse.data.data.CreateToken.id;
-
-            // Poll for transaction status every 10 seconds
-            while (true) {
-                const transaction = await getTransactionStatus(createTokenRequestId);
-
-                if (transaction.state === 'PENDING'){
-                    console.log(`Please confirm the request in the Enjin Platform. Request ID: ${createTokenRequestId}`);
-                    await sleep(10000);
-                    continue;
-                }
-                
-                if (transaction.state === 'FINALIZED' && transaction.result === 'EXTRINSIC_SUCCESS') {
-                    console.log("Resource token #3 created successfully.");
-                    break;
-                } else if (transaction.state === 'FAILED' || transaction.result === 'EXTRINSIC_FAILED') {
-                    throw new Error('Token creation failed');
-                }
-
-                console.log('Waiting for token creation to finalize...');
-                await sleep(10000);
-            }
-
-        }
-    } catch (error) {
-        console.error('Failed to create resource token #3:', error);
         throw error;
     }
 }
 
+async function createResourceToken(collectionId, tokenId, name, media) {
+    console.log(`Creating resource token '${name}', please wait...`);
+    const createTokenResponse = await createToken(collectionId, tokenId, name, media);
+    await sleep(10000);
+    
+    const requestId = createTokenResponse.data.data.CreateToken.id;
+    await waitForTransaction(requestId, `'${name}' token creation`);
+    console.log(`Resource token '${name}' created successfully.`);
+}
+
+async function prepareCollection() {
+    // Ensure collection exists
+    const collectionId = await checkAndCreateCollection();
+
+    // Checks which resource tokens exist
+    const tokenExistsChecks = await Promise.all(
+        RESOURCE_TOKENS.map(token =>
+            checkTokenExists(collectionId, token.id)
+                .then(exists => ({ ...token, exists }))
+        )
+    );
+
+    // Create missing tokens in parallel
+    const tokensToCreate = tokenExistsChecks.filter(token => !token.exists);
+    if (tokensToCreate.length > 0) {
+        await Promise.all(
+            tokensToCreate.map(token =>
+                createResourceToken(collectionId, token.id, token.name, token.media)
+                    .catch(error => {
+                        console.error(`Failed to create resource token #${token.id}:`, error);
+                        throw error;
+                    })
+            )
+        );
+    }
+}
+
 module.exports = {
-    checkAndPrepareCollection
+    prepareCollection, createManagedWallet, getManagedWallet, mintToken, burnToken, transferToken
 };

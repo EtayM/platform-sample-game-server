@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const { checkAndPrepareCollection } = require('./services/enjinService');
+const { prepareCollection } = require('./services/enjinService');
 
 // Load environment variables
 dotenv.config();
@@ -15,6 +15,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/wallet', require('./routes/wallet'));
 app.use('/api/token', require('./routes/token'));
 
 // Basic error handling
@@ -29,12 +30,16 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 // Start server after checking collection
-checkAndPrepareCollection()
+prepareCollection()
     .then(() => {
+        console.log("----------------------------------------")
         console.log(`Collection and resource tokens are ready. Using collection ID: ${process.env.ENJIN_COLLECTION_ID}`);
-        app.listen(PORT, () => {
+        const server = app.listen(PORT, () => {
             console.log(`Server is running on port ${PORT}`);
+            console.log("----------------------------------------")
         });
+        // Set the timeout for all requests to 1 hour (3,600,000 ms)
+        server.timeout = 3600000;
     })
     .catch(error => {
         console.error('Failed to start server:', error);

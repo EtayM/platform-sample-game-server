@@ -3,6 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const appKeyAuth = require('../middlewares/appKeyAuth');
 const jwtAuth = require('../middlewares/jwtAuth');
+const { mintToken, burnToken, transferToken } = require('../services/enjinService');
 
 // Middleware chain for token operations
 const tokenMiddleware = [appKeyAuth, jwtAuth];
@@ -10,29 +11,10 @@ const tokenMiddleware = [appKeyAuth, jwtAuth];
 // Mint token endpoint
 router.post('/mint', tokenMiddleware, async (req, res) => {
     try {
-        const response = await axios.post(process.env.ENJIN_API_URL, {
-            query: `mutation CreateCollection($forceCollapsingSupply: Boolean) {
-                CreateCollection(
-                    mintPolicy: { forceCollapsingSupply: $forceCollapsingSupply }
-                ) {
-                    id
-                    method
-                    state
-                }
-            }`,
-            variables: {
-                forceCollapsingSupply: false
-            }
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': process.env.ENJIN_API_KEY
-            }
-        });
+        await mintToken(req.body.tokenId, req.body.recipient, req.body.amount)
 
         res.json({
-            success: true,
-            data: response.data
+            success: true
         });
     } catch (error) {
         res.status(500).json({
@@ -45,22 +27,10 @@ router.post('/mint', tokenMiddleware, async (req, res) => {
 // Burn token endpoint
 router.post('/burn', tokenMiddleware, async (req, res) => {
     try {
-        const response = await axios.post(process.env.ENJIN_API_URL, {
-            // Placeholder for burn mutation
-            query: `mutation BurnToken {
-                // Add your burn mutation here
-            }`,
-            variables: req.body
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': process.env.ENJIN_API_KEY
-            }
-        });
+        await burnToken(req.body.tokenId, req.body.recipient, req.body.amount)
 
         res.json({
-            success: true,
-            data: response.data
+            success: true
         });
     } catch (error) {
         res.status(500).json({
@@ -73,22 +43,10 @@ router.post('/burn', tokenMiddleware, async (req, res) => {
 // Transfer token endpoint
 router.post('/transfer', tokenMiddleware, async (req, res) => {
     try {
-        const response = await axios.post(process.env.ENJIN_API_URL, {
-            // Placeholder for transfer mutation
-            query: `mutation TransferToken {
-                // Add your transfer mutation here
-            }`,
-            variables: req.body
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': process.env.ENJIN_API_KEY
-            }
-        });
+        await transferToken(req.body.tokenId, req.body.recipient, req.body.amount)
 
         res.json({
-            success: true,
-            data: response.data
+            success: true
         });
     } catch (error) {
         res.status(500).json({
