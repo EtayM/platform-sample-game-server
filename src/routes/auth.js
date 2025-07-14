@@ -4,6 +4,13 @@ const AuthService = require('../services/authService');
 const appKeyAuth = require('../middlewares/appKeyAuth');
 const { getManagedWallet, createManagedWallet } = require('../services/enjinService');
 
+// Health check endpoint
+router.get('/health-check', appKeyAuth, async (req, res) => {
+    res.status(200).json({
+        status: "OK"
+    });
+});
+
 // Register endpoint
 router.post('/register', appKeyAuth, async (req, res) => {
     try {
