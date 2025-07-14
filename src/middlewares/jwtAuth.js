@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/user');
 
 const jwtAuth = (req, res, next) => {
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers["user_authorization"];
 
     if (!authHeader) {
         return res.status(401).json({
@@ -16,6 +16,7 @@ const jwtAuth = (req, res, next) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         
         const user = User.findByEmail(decoded.email);
+        console.log(user)
         if (!user) {
             throw new Error('User not found');
         }
