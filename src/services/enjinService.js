@@ -205,6 +205,109 @@ async function getManagedWallet(externalId){
     return response.data.data.GetWallet;
 }
 
+async function getManagedWalletTokens(externalId, after = "") {
+    let allTokenAccounts = [];
+    let hasNextPage = true;
+    let endCursor = after;
+    let account = null;
+
+    while (hasNextPage) {
+        const response = await axios.post(process.env.ENJIN_API_URL, {
+            query: `query GetWalletTokens($externalId: String!){
+  GetWallet(externalId: $externalId){
+    account{
+      publicKey
+      address
+    }
+    tokenAccounts(after: "${endCursor}"){
+      pageInfo{
+        hasNextPage
+        endCursor
+      }
+      edges{
+        node{
+          balance
+          token{
+            tokenId
+            collection{
+              collectionId
+            }
+            attributes{
+              key
+              value
+            }
+          }
+        }
+      }
+    }
+  }
+}`,
+            variables: {
+                externalId: externalId
+            }
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': process.env.ENJIN_API_KEY
+            }
+        });
+
+        const walletData = response.data.data.GetWallet;
+        if (!walletData || !walletData.tokenAccounts) {
+            console.warn("No token accounts found in the response.");
+            hasNextPage = false;
+            break;
+        }
+
+        account = walletData.account
+        allTokenAccounts = allTokenAccounts.concat(walletData.tokenAccounts.edges.map(edge => edge.node));
+        hasNextPage = walletData.tokenAccounts.pageInfo.hasNextPage;
+        endCursor = walletData.tokenAccounts.pageInfo.endCursor;
+    }
+
+    return {account: account, tokens: allTokenAccounts};
+}
+
+// async function getManagedWalletTokens(externalId){
+//     const response = await axios.post(process.env.ENJIN_API_URL, {
+//         query: `query GetWalletTokens ($externalId: String!){
+//   GetWallet(externalId: $externalId){
+//     account{
+//       publicKey
+//       address
+//     }
+//     tokenAccounts{
+//       edges{
+//         node{
+//           balance
+//           token{
+//             tokenId
+//             collection{
+//               collectionId
+//             }
+//             attributes{
+//               key
+//               value
+//             }
+//           }
+//         }
+//       }
+//     }
+//   }
+// }`,
+//         variables: {
+//             externalId: externalId
+//         }
+//     }, {
+//         headers: {
+//             'Content-Type': 'application/json',
+//             'Authorization': process.env.ENJIN_API_KEY
+//         }
+//     });
+
+//     return response.data.data.GetWallet;
+// }
+
 async function createManagedWallet(externalId){
     try {
         const existingWallet = await getManagedWallet(externalId);
@@ -463,5 +566,5 @@ async function prepareCollection() {
 }
 
 module.exports = {
-    prepareCollection, createManagedWallet, getManagedWallet, mintToken, burnToken, transferToken
+    prepareCollection, createManagedWallet, getManagedWallet, getManagedWalletTokens, mintToken, burnToken, transferToken
 };

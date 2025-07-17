@@ -3,7 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const appKeyAuth = require('../middlewares/appKeyAuth');
 const jwtAuth = require('../middlewares/jwtAuth');
-const { getManagedWallet, createManagedWallet } = require('../services/enjinService');
+const { getManagedWallet, createManagedWallet, getManagedWalletTokens } = require('../services/enjinService');
 
 // Middleware chain for token operations
 const tokenMiddleware = [appKeyAuth, jwtAuth];
@@ -39,6 +39,27 @@ router.post('/create', tokenMiddleware, async (req, res) => {
         res.json({
             success: true,
             wallet: wallet
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+});
+
+// Get managed wallet endpoint
+router.post('/get-tokens', tokenMiddleware, async (req, res) => {
+    try {
+        const userEmail = req.user.email;
+        const getManagedWalletTokensResponse = await getManagedWalletTokens(userEmail)
+        if (!getManagedWalletTokensResponse)
+            throw new Error(`Failed to get managed wallet tokens for external id ${userEmail}`);
+        const wallet = getManagedWalletTokensResponse.account.address;
+        const tokens = getManagedWalletTokensResponse.tokens;
+        res.json({
+            wallet: wallet,
+            tokens: tokens
         });
     } catch (error) {
         res.status(500).json({
