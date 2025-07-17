@@ -15,19 +15,15 @@ router.get('/health-check', appKeyAuth, async (req, res) => {
 router.post('/register', appKeyAuth, async (req, res) => {
     try {
         const { email, password } = req.body;
-        const result = await AuthService.register(email, password);
+        const token = await AuthService.register(email, password);
         const createManagedWalletResponse = await createManagedWallet(email);
         let wallet = null;
         if (createManagedWalletResponse)
             wallet = createManagedWalletResponse.account.address;
             
         res.status(201).json({
-            success: true,
-            data: {
-                email: result.user.email,
-                wallet: wallet,
-                token: result.token
-            }
+            wallet: wallet,
+            token: token
         });
     } catch (error) {
         res.status(400).json({
@@ -41,14 +37,15 @@ router.post('/register', appKeyAuth, async (req, res) => {
 router.post('/login', appKeyAuth, async (req, res) => {
     try {
         const { email, password } = req.body;
-        const result = await AuthService.login(email, password);
+        const token = await AuthService.login(email, password);
+        const getManagedWalletResponse = await getManagedWallet(email);
+        let wallet = null;
+        if (getManagedWalletResponse)
+            wallet = getManagedWalletResponse.account.address;
         
         res.status(200).json({
-            success: true,
-            data: {
-                email: result.user.email,
-                token: result.token
-            }
+            wallet: wallet,
+            token: token
         });
     } catch (error) {
         res.status(401).json({

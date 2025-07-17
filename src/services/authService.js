@@ -25,11 +25,22 @@ class AuthService {
             throw new Error('Email and password are required');
         }
 
+        const existingUser = User.findByEmail(email);
+        if (existingUser) {
+            // User already exists, try to login
+            try {
+                const token = await this.login(email, password);
+                return token;
+            } catch (loginError) {
+                throw new Error('Registration failed: User already exists, but login failed.');
+            }
+        }
+
         const hashedPassword = await this.hashPassword(password);
         const user = User.create(email, hashedPassword);
         const token = this.generateToken(user);
 
-        return { user, token };
+        return token;
     }
 
     static async login(email, password) {
@@ -46,7 +57,7 @@ class AuthService {
         }
 
         const token = this.generateToken(user);
-        return { user, token };
+        return token;
     }
 }
 
