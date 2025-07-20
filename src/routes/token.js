@@ -3,7 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const appKeyAuth = require('../middlewares/appKeyAuth');
 const jwtAuth = require('../middlewares/jwtAuth');
-const { mintToken, burnToken, transferToken } = require('../services/enjinService');
+const { mintTokenAndWaitForTransaction, meltTokenAndWaitForTransaction, transferTokenAndWaitForTransaction, getManagedWallet } = require('../services/enjinService');
 
 // Middleware chain for token operations
 const tokenMiddleware = [appKeyAuth, jwtAuth];
@@ -11,7 +11,12 @@ const tokenMiddleware = [appKeyAuth, jwtAuth];
 // Mint token endpoint
 router.post('/mint', tokenMiddleware, async (req, res) => {
     try {
-        await mintToken(req.body.tokenId, req.body.recipient, req.body.amount)
+        const userEmail = req.user.email;
+        const getManagedWalletResponse = await getManagedWallet(userEmail)
+        if (!getManagedWalletResponse)
+            throw new Error(`Failed to get managed wallet for external id ${userEmail}`);
+        const userWalletAddress = getManagedWalletResponse.account.address;
+        await mintTokenAndWaitForTransaction(req.body.tokenId, req.body.amount, userWalletAddress);
 
         res.json({
             success: true
@@ -24,10 +29,15 @@ router.post('/mint', tokenMiddleware, async (req, res) => {
     }
 });
 
-// Burn token endpoint
-router.post('/burn', tokenMiddleware, async (req, res) => {
+// Melt token endpoint
+router.post('/melt', tokenMiddleware, async (req, res) => {
     try {
-        await burnToken(req.body.tokenId, req.body.recipient, req.body.amount)
+        const userEmail = req.user.email;
+        const getManagedWalletResponse = await getManagedWallet(userEmail)
+        if (!getManagedWalletResponse)
+            throw new Error(`Failed to get managed wallet for external id ${userEmail}`);
+        const userWalletAddress = getManagedWalletResponse.account.address;
+        await meltTokenAndWaitForTransaction(req.body.tokenId, req.body.amount, userWalletAddress);
 
         res.json({
             success: true
@@ -43,7 +53,12 @@ router.post('/burn', tokenMiddleware, async (req, res) => {
 // Transfer token endpoint
 router.post('/transfer', tokenMiddleware, async (req, res) => {
     try {
-        await transferToken(req.body.tokenId, req.body.recipient, req.body.amount)
+        const userEmail = req.user.email;
+        const getManagedWalletResponse = await getManagedWallet(userEmail)
+        if (!getManagedWalletResponse)
+            throw new Error(`Failed to get managed wallet for external id ${userEmail}`);
+        const userWalletAddress = getManagedWalletResponse.account.address;
+        await transferTokenAndWaitForTransaction(req.body.tokenId, req.body.amount, userWalletAddress, req.body.recipient);
 
         res.json({
             success: true

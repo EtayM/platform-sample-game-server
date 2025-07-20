@@ -268,46 +268,6 @@ async function getManagedWalletTokens(externalId, after = "") {
     return {account: account, tokens: allTokenAccounts};
 }
 
-// async function getManagedWalletTokens(externalId){
-//     const response = await axios.post(process.env.ENJIN_API_URL, {
-//         query: `query GetWalletTokens ($externalId: String!){
-//   GetWallet(externalId: $externalId){
-//     account{
-//       publicKey
-//       address
-//     }
-//     tokenAccounts{
-//       edges{
-//         node{
-//           balance
-//           token{
-//             tokenId
-//             collection{
-//               collectionId
-//             }
-//             attributes{
-//               key
-//               value
-//             }
-//           }
-//         }
-//       }
-//     }
-//   }
-// }`,
-//         variables: {
-//             externalId: externalId
-//         }
-//     }, {
-//         headers: {
-//             'Content-Type': 'application/json',
-//             'Authorization': process.env.ENJIN_API_KEY
-//         }
-//     });
-
-//     return response.data.data.GetWallet;
-// }
-
 async function createManagedWallet(externalId){
     try {
         const existingWallet = await getManagedWallet(externalId);
@@ -354,7 +314,7 @@ async function createManagedWallet(externalId){
     
 }
 
-async function mintToken(tokenId, recipient, amount){
+async function mintToken(tokenId, amount, recipient){
     collectionId = process.env.ENJIN_COLLECTION_ID;
     const response = await axios.post(process.env.ENJIN_API_URL, {
         query: `mutation mintToken(
@@ -392,22 +352,38 @@ async function mintToken(tokenId, recipient, amount){
     return response;
 }
 
-async function burnToken(tokenId, recipient, amount){
+async function mintTokenAndWaitForTransaction(tokenId, amount, recipient) {
+    console.log('Minting Token, please wait...');
+    try {
+        const mintTokenResponse = await mintToken(tokenId, amount, recipient);
+        await sleep(10000);
+        
+        const requestId = mintTokenResponse.data.data.MintToken.id;
+        await waitForTransaction(requestId, "'Token #" + tokenId + "' minting");
+        console.log(`'Token #${tokenId}' minted successfully.`);
+        return;
+    } catch (error) {
+        console.error("Failed to mint 'token #" + tokenId + "': ", JSON.stringify(error));
+        throw error;
+    }
+}
+
+async function meltToken(tokenId, amount, signingAccount){
     collectionId = process.env.ENJIN_COLLECTION_ID;
     const response = await axios.post(process.env.ENJIN_API_URL, {
-                query: `mutation mintToken(
-  $recipient: String!
+                query: `mutation burnToken(
   $collectionId: BigInt!
   $tokenId: BigInt
   $amount: BigInt!
+  $signingAccount: String!
 ){
-  MintToken(
-    recipient: $recipient
+  Burn(
     collectionId: $collectionId
     params: {
       tokenId: {integer: $tokenId}
       amount: $amount
     }
+    signingAccount: $signingAccount
   ){
     id
     method
@@ -415,10 +391,10 @@ async function burnToken(tokenId, recipient, amount){
   }
 }`,
         variables: {
-            recipient: recipient,
             collectionId: collectionId,
             tokenId: tokenId,
-            amount: amount
+            amount: amount,
+            signingAccount: signingAccount
         }
     }, {
         headers: {
@@ -430,22 +406,40 @@ async function burnToken(tokenId, recipient, amount){
     return response;
 }
 
-async function transferToken(tokenId, recipient, amount){
+async function meltTokenAndWaitForTransaction(tokenId, amount, signingAccount) {
+    console.log('Melting Token, please wait...');
+    try {
+        const meltTokenResponse = await meltToken(tokenId, amount, signingAccount);
+        await sleep(10000);
+        
+        const requestId = meltTokenResponse.data.data.Burn.id;
+        await waitForTransaction(requestId, "'Token #" + tokenId + "' melting");
+        console.log(`'Token #${tokenId}' melted successfully.`);
+        return;
+    } catch (error) {
+        console.error("Failed to melt 'token #" + tokenId + "': ", JSON.stringify(error));
+        throw error;
+    }
+}
+
+async function transferToken(tokenId, amount, signingAccount, recipient){
     collectionId = process.env.ENJIN_COLLECTION_ID;
     const response = await axios.post(process.env.ENJIN_API_URL, {
-                query: `mutation mintToken(
-  $recipient: String!
+                query: `mutation transferToken(
   $collectionId: BigInt!
-  $tokenId: BigInt
+  $tokenId: BigInt!
   $amount: BigInt!
+  $recipient: String!
+  $signingAccount: String!
 ){
-  MintToken(
-    recipient: $recipient
+  SimpleTransferToken(
     collectionId: $collectionId
+    recipient: $recipient
     params: {
       tokenId: {integer: $tokenId}
       amount: $amount
     }
+    signingAccount: $signingAccount
   ){
     id
     method
@@ -456,7 +450,8 @@ async function transferToken(tokenId, recipient, amount){
             recipient: recipient,
             collectionId: collectionId,
             tokenId: tokenId,
-            amount: amount
+            amount: amount,
+            signingAccount: signingAccount
         }
     }, {
         headers: {
@@ -466,6 +461,22 @@ async function transferToken(tokenId, recipient, amount){
     });
 
     return response;
+}
+
+async function transferTokenAndWaitForTransaction(tokenId, amount, signingAccount, recipient) {
+    console.log('Transferring Token, please wait...');
+    try {
+        const transferTokenResponse = await transferToken(tokenId, amount, signingAccount, recipient);
+        await sleep(10000);
+        
+        const requestId = transferTokenResponse.data.data.SimpleTransferToken.id;
+        await waitForTransaction(requestId, "'Token #" + tokenId + "' transfer");
+        console.log(`'Token #${tokenId}' transferred successfully.`);
+        return;
+    } catch (error) {
+        console.error("Failed to transfer 'token #" + tokenId + "': ", JSON.stringify(error));
+        throw error;
+    }
 }
 
 async function waitForTransaction(requestId, operationType = 'operation') {
@@ -482,7 +493,7 @@ async function waitForTransaction(requestId, operationType = 'operation') {
             return transaction;
         }
 
-        if (transaction.state === 'FAILED' || transaction.result === 'EXTRINSIC_FAILED') {
+        if (transaction.state === 'FAILED' || transaction.state === 'ABANDONED' || transaction.result === 'EXTRINSIC_FAILED') {
             throw new Error(`${operationType} failed`);
         }
 
@@ -566,5 +577,5 @@ async function prepareCollection() {
 }
 
 module.exports = {
-    prepareCollection, createManagedWallet, getManagedWallet, getManagedWalletTokens, mintToken, burnToken, transferToken
+    prepareCollection, createManagedWallet, getManagedWallet, getManagedWalletTokens, mintTokenAndWaitForTransaction, meltTokenAndWaitForTransaction, transferTokenAndWaitForTransaction
 };

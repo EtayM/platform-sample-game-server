@@ -49,17 +49,15 @@ router.post('/create', tokenMiddleware, async (req, res) => {
 });
 
 // Get managed wallet endpoint
-router.post('/get-tokens', tokenMiddleware, async (req, res) => {
+router.get('/get-tokens', tokenMiddleware, async (req, res) => {
     try {
         const userEmail = req.user.email;
         const getManagedWalletTokensResponse = await getManagedWalletTokens(userEmail)
         if (!getManagedWalletTokensResponse)
             throw new Error(`Failed to get managed wallet tokens for external id ${userEmail}`);
-        const wallet = getManagedWalletTokensResponse.account.address;
-        const tokens = getManagedWalletTokensResponse.tokens;
         res.json({
-            wallet: wallet,
-            tokens: tokens
+            "account": getManagedWalletTokensResponse.account,
+            "tokenAccounts": getManagedWalletTokensResponse.tokens
         });
     } catch (error) {
         res.status(500).json({
